@@ -117,6 +117,66 @@ const tools: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'actualizar_cliente',
+    description: 'Actualiza los datos de un cliente ya registrado',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        cliente_id: { type: 'string', description: 'ID del cliente a actualizar' },
+        nombre: { type: 'string' },
+        apellido_paterno: { type: 'string' },
+        apellido_materno: { type: 'string' },
+        telefono: { type: 'string' },
+        telefono_alternativo: { type: 'string' },
+        email: { type: 'string' },
+        curp: { type: 'string' },
+        rfc: { type: 'string' },
+        nss: { type: 'string' },
+        fecha_nacimiento: { type: 'string' },
+        estado_civil: { type: 'string' },
+        domicilio: { type: 'string' },
+        colonia: { type: 'string' },
+        ciudad: { type: 'string' },
+        estado: { type: 'string' },
+        cp: { type: 'string' },
+        ingreso_mensual: { type: 'number' },
+        empresa: { type: 'string' },
+        ocupacion: { type: 'string' },
+        tipo_empleado: { type: 'string' },
+        antiguedad_laboral: { type: 'string' },
+        notas: { type: 'string' },
+      },
+      required: ['cliente_id'],
+    },
+  },
+  {
+    name: 'actualizar_unidad',
+    description: 'Actualiza los datos de una unidad/vehículo ya registrada (precio, año, color, estatus, etc.)',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        unidad_id: { type: 'string', description: 'ID de la unidad a actualizar' },
+        marca: { type: 'string' },
+        modelo: { type: 'string' },
+        anio: { type: 'number' },
+        version: { type: 'string' },
+        color: { type: 'string' },
+        precio: { type: 'number', description: 'Precio de venta en pesos' },
+        precio_lista: { type: 'number' },
+        numero_serie: { type: 'string' },
+        numero_motor: { type: 'string' },
+        placas: { type: 'string' },
+        tipo: { type: 'string', description: 'nuevo o seminuevo' },
+        transmision: { type: 'string' },
+        combustible: { type: 'string' },
+        kilometraje: { type: 'number' },
+        estatus: { type: 'string', description: 'disponible, apartada, en_proceso, vendida' },
+        notas: { type: 'string' },
+      },
+      required: ['unidad_id'],
+    },
+  },
+  {
     name: 'obtener_resumen',
     description: 'Obtiene un resumen del sistema: clientes, unidades disponibles, solicitudes activas, etc.',
     input_schema: {
@@ -177,6 +237,27 @@ async function executeTool(name: string, input: Record<string, unknown>) {
     if (input.solo_disponibles) query = query.eq('estatus', 'disponible')
     const { data } = await query.limit(10)
     return { unidades: data || [], total: data?.length || 0 }
+  }
+
+  if (name === 'actualizar_cliente') {
+    const { cliente_id, ...campos } = input
+    // Eliminar campos undefined/vacíos
+    const data = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== ''))
+    const { error } = await supabase.from('clientes').update(data).eq('id', cliente_id)
+    if (error) return { error: error.message }
+    return { success: true, mensaje: `Cliente actualizado correctamente.` }
+  }
+
+  if (name === 'actualizar_unidad') {
+    const { unidad_id, ...campos } = input
+    const data = Object.fromEntries(Object.entries(campos).filter(([, v]) => v !== undefined && v !== ''))
+    if (data.anio) data.anio = Number(data.anio)
+    if (data.precio) data.precio = Number(data.precio)
+    if (data.precio_lista) data.precio_lista = Number(data.precio_lista)
+    if (data.kilometraje) data.kilometraje = Number(data.kilometraje)
+    const { error } = await supabase.from('unidades').update(data).eq('id', unidad_id)
+    if (error) return { error: error.message }
+    return { success: true, mensaje: `Unidad actualizada correctamente.` }
   }
 
   if (name === 'crear_solicitud') {
