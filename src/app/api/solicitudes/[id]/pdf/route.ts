@@ -137,7 +137,7 @@ export async function GET(
   let templateName: string
   if (bankCode === 'BANORTE') templateName = 'BANORTE.pdf'
   else if (bankCode === 'BBVA') templateName = 'BBVA.pdf'
-  else if (bankCode === 'SCOTIABANK') templateName = 'SCOTIABANK.pdf'
+  else if (bankCode === 'SCOTIA' || bankCode === 'SCOTIABANK') templateName = 'SCOTIABANK.pdf'
   else return NextResponse.json({ error: `Banco "${bankCode}" no soportado` }, { status: 400 })
 
   const templateBytes = readFileSync(join(process.cwd(), 'public', 'templates', templateName))
