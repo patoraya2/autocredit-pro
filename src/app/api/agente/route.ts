@@ -17,16 +17,24 @@ const tools: Anthropic.Tool[] = [
         nombre: { type: 'string', description: 'Nombre(s) del cliente' },
         apellido_paterno: { type: 'string', description: 'Apellido paterno' },
         apellido_materno: { type: 'string', description: 'Apellido materno (opcional)' },
-        telefono: { type: 'string', description: 'Teléfono de contacto' },
+        telefono: { type: 'string', description: 'Teléfono celular' },
+        telefono_alternativo: { type: 'string', description: 'Teléfono alternativo' },
         email: { type: 'string', description: 'Correo electrónico' },
-        curp: { type: 'string', description: 'CURP' },
-        rfc: { type: 'string', description: 'RFC' },
-        ciudad: { type: 'string', description: 'Ciudad de residencia' },
-        estado: { type: 'string', description: 'Estado de residencia' },
+        curp: { type: 'string', description: 'CURP (18 caracteres)' },
+        rfc: { type: 'string', description: 'RFC con homoclave' },
+        nss: { type: 'string', description: 'Número de Seguro Social' },
+        fecha_nacimiento: { type: 'string', description: 'Fecha de nacimiento en formato YYYY-MM-DD' },
+        estado_civil: { type: 'string', description: 'Estado civil: Soltero/a, Casado/a, Divorciado/a, Viudo/a, Unión libre' },
+        domicilio: { type: 'string', description: 'Calle y número' },
+        colonia: { type: 'string', description: 'Colonia' },
+        ciudad: { type: 'string', description: 'Ciudad o municipio' },
+        estado: { type: 'string', description: 'Estado de la república' },
+        cp: { type: 'string', description: 'Código postal' },
         ingreso_mensual: { type: 'number', description: 'Ingreso mensual en pesos' },
         empresa: { type: 'string', description: 'Empresa donde trabaja' },
         ocupacion: { type: 'string', description: 'Ocupación o puesto' },
-        tipo_empleado: { type: 'string', description: 'Tipo: asalariado, independiente, empresario' },
+        tipo_empleado: { type: 'string', description: 'Tipo: asalariado, independiente, empresario, pensionado' },
+        antiguedad_laboral: { type: 'string', description: 'Antigüedad laboral (ej: 2 años)' },
         notas: { type: 'string', description: 'Notas adicionales' },
       },
       required: ['nombre', 'apellido_paterno'],
@@ -86,8 +94,8 @@ const tools: Anthropic.Tool[] = [
         banco_nombre: { type: 'string', description: 'Nombre del banco: Scotiabank, BBVA o Banorte' },
         enganche: { type: 'number', description: 'Monto de enganche en pesos' },
         plazo_meses: { type: 'number', description: 'Plazo en meses (12, 24, 36, 48, 60, 72)' },
-        precio_venta: { type: 'number', description: 'Precio de venta acordado (puede diferir del precio de lista)' },
-        notas: { type: 'string', description: 'Observaciones adicionales para la solicitud' },
+        precio_venta: { type: 'number', description: 'Precio de venta acordado' },
+        notas: { type: 'string', description: 'Observaciones adicionales' },
       },
       required: ['cliente_id', 'unidad_id', 'banco_nombre'],
     },
@@ -101,7 +109,7 @@ const tools: Anthropic.Tool[] = [
         solicitud_id: { type: 'string', description: 'ID o folio de la solicitud' },
         nuevo_estatus: {
           type: 'string',
-          description: 'Nueva estatus: nueva, preparando, enviada, en_revision, aprobada, rechazada, fondeada, cancelada',
+          description: 'Nuevo estatus: nueva, preparando, enviada, en_revision, aprobada, rechazada, fondeada, cancelada',
         },
         nota: { type: 'string', description: 'Nota sobre el cambio de estatus' },
       },
@@ -172,7 +180,6 @@ async function executeTool(name: string, input: Record<string, unknown>) {
   }
 
   if (name === 'crear_solicitud') {
-    // Buscar banco
     const bancoMap: Record<string, string> = {
       scotiabank: 'SCOTIA', bbva: 'BBVA', banorte: 'BANORTE',
     }
@@ -187,9 +194,8 @@ async function executeTool(name: string, input: Record<string, unknown>) {
       .select('id, nombre')
       .eq('codigo', bancoCodigo)
       .single()
-    if (!banco) return { error: `Banco no encontrado: ${input.banco_nombre}. Los bancos disponibles son: Scotiabank, BBVA, Banorte` }
+    if (!banco) return { error: `Banco no encontrado: ${input.banco_nombre}. Disponibles: Scotiabank, BBVA, Banorte` }
 
-    // Obtener precio de la unidad si no se especificó
     let precioVenta = Number(input.precio_venta) || 0
     if (!precioVenta) {
       const { data: unidad } = await supabase.from('unidades').select('precio').eq('id', input.unidad_id).single()
@@ -199,7 +205,7 @@ async function executeTool(name: string, input: Record<string, unknown>) {
     const { data, error } = await supabase
       .from('solicitudes')
       .insert({
-        folio: '', // trigger lo genera
+        folio: '',
         cliente_id: input.cliente_id as string,
         unidad_id: input.unidad_id as string,
         banco_id: banco.id,
@@ -220,7 +226,6 @@ async function executeTool(name: string, input: Record<string, unknown>) {
   }
 
   if (name === 'actualizar_estatus_solicitud') {
-    // Buscar por ID o folio
     const solicitudId = String(input.solicitud_id)
     const isUUID = /^[0-9a-f-]{36}$/.test(solicitudId)
     const { data: solicitud } = isUUID
@@ -284,7 +289,6 @@ async function executeTool(name: string, input: Record<string, unknown>) {
       return { por_banco: bancos }
     }
 
-    // General
     const [{ count: cl }, { data: un }, { data: so }] = await Promise.all([
       supabase.from('clientes').select('*', { count: 'exact', head: true }).eq('activo', true),
       supabase.from('unidades').select('estatus'),
@@ -295,12 +299,7 @@ async function executeTool(name: string, input: Record<string, unknown>) {
     const disponibles = (un as UnRow[] | null)?.filter(u => u.estatus === 'disponible').length || 0
     const activas = (so as SoRow[] | null)?.filter(s => !['fondeada', 'rechazada', 'cancelada'].includes(s.estatus)).length || 0
     const montoTotal = (so as SoRow[] | null)?.reduce((a, b) => a + (b.monto_financiar || 0), 0) || 0
-    return {
-      clientes_activos: cl,
-      unidades_disponibles: disponibles,
-      solicitudes_activas: activas,
-      monto_total_cartera: montoTotal,
-    }
+    return { clientes_activos: cl, unidades_disponibles: disponibles, solicitudes_activas: activas, monto_total_cartera: montoTotal }
   }
 
   return { error: 'Herramienta no reconocida' }
@@ -309,32 +308,69 @@ async function executeTool(name: string, input: Record<string, unknown>) {
 // ——————————————————————————————————————————
 // POST Handler
 // ——————————————————————————————————————————
+interface FileItem {
+  name: string
+  type: string
+  data: string // base64
+}
+
 export async function POST(req: NextRequest) {
-  const { messages } = await req.json()
+  const { messages, files } = await req.json() as {
+    messages: Array<{ role: string; content: string }>
+    files?: FileItem[]
+  }
 
   const systemPrompt = `Eres el asistente de AutoCredit Pro, un sistema de gestión de crédito automotriz.
-Puedes ayudar a:
-- Registrar nuevos clientes y vehículos (unidades)
-- Crear y gestionar solicitudes de crédito
-- Consultar información del sistema
-- Actualizar el estado de las solicitudes
 
+Cuando el usuario adjunte documentos (INE, constancia de situación fiscal SAT, comprobante de domicilio, PDF con información del cliente):
+1. Lee TODOS los documentos cuidadosamente y extrae cada dato visible del cliente
+2. Llama a registrar_cliente inmediatamente con todos los datos extraídos sin pedir confirmación
+3. Confirma al usuario qué datos se registraron e indica si faltó algún campo importante (RFC, teléfono, etc.)
+4. Si hay datos del vehículo o banco, también crea la solicitud automáticamente
+
+Datos a extraer según el documento:
+- INE / IFE: nombre completo, CURP, domicilio, fecha de nacimiento, clave de elector
+- Constancia SAT: RFC, nombre fiscal, domicilio fiscal, CP, ciudad, estado, régimen
+- Comprobante de domicilio: calle, colonia, CP, ciudad, estado
+- Cualquier PDF con datos personales: extrae todo lo que encuentres
+
+Campos de fecha de nacimiento: usar formato YYYY-MM-DD.
+Precios en pesos: interpretar "$485,000" como 485000.
 Los bancos disponibles son: Scotiabank, BBVA y Banorte.
 
-Cuando el usuario te dé instrucciones como "registra un cliente llamado X" o "hay una unidad nueva Ford Lobo con precio $795,000", usa las herramientas para ejecutar esas acciones directamente en el sistema.
-
-Cuando se mencionen precios en pesos mexicanos (ej: "$485,000 pesos"), interprétalos como números sin comas ni signos (485000).
-
-Si no tienes suficiente información para ejecutar una acción, pregunta solo lo estrictamente necesario.
-
+Si el usuario solo dice instrucciones en texto sin documentos, ejecuta la acción directamente.
 Responde siempre en español de manera concisa y confirma las acciones realizadas.`
 
   try {
-    // Agentic loop con tool use
-    const msgs: Anthropic.MessageParam[] = messages.map((m: { role: string; content: string }) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }))
+    // Construir mensajes para Claude
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const msgs: any[] = messages.map((m, i) => {
+      const isLastUser = i === messages.length - 1 && m.role === 'user' && files && files.length > 0
+
+      if (isLastUser) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const content: any[] = []
+
+        for (const file of files!) {
+          if (file.type.startsWith('image/')) {
+            const mediaType = file.type as 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+            content.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data: file.data } })
+          } else if (file.type === 'application/pdf') {
+            content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: file.data } })
+          }
+        }
+
+        if (m.content.trim()) {
+          content.push({ type: 'text', text: m.content })
+        } else {
+          content.push({ type: 'text', text: 'Analiza estos documentos, extrae todos los datos del cliente y regístralo en el sistema.' })
+        }
+
+        return { role: 'user', content }
+      }
+
+      return { role: m.role as 'user' | 'assistant', content: m.content }
+    })
 
     let response = await anthropic.messages.create({
       model: 'claude-sonnet-4-6',
@@ -344,18 +380,13 @@ Responde siempre en español de manera concisa y confirma las acciones realizada
       messages: msgs,
     })
 
-    // Loop hasta que no haya más tool_use
     while (response.stop_reason === 'tool_use') {
       const toolUseBlocks = response.content.filter(b => b.type === 'tool_use') as Anthropic.ToolUseBlock[]
       const toolResults: Anthropic.ToolResultBlockParam[] = []
 
       for (const toolUse of toolUseBlocks) {
         const result = await executeTool(toolUse.name, toolUse.input as Record<string, unknown>)
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: JSON.stringify(result),
-        })
+        toolResults.push({ type: 'tool_result', tool_use_id: toolUse.id, content: JSON.stringify(result) })
       }
 
       msgs.push({ role: 'assistant', content: response.content })
